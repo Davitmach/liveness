@@ -136,29 +136,72 @@ function getHeadPose(face) {
   return { yaw, pitch };
 }
 
-// 🎨 круг
-function drawProgress() {
+function clamp01(x) {
+  return Math.max(0, Math.min(1, x));
+}
+
+// 0..1 — насколько лицо близко к центру кадра
+function centerProgress(face) {
+  const nose = face[1];
+  const nx = (nose.x - 0.5) * 2;
+  const ny = (nose.y - 0.5) * 2;
+  const dist = Math.hypot(nx, ny);
+  return clamp01(1 - dist / 0.42);
+}
+
+/** Прогресс 0..1 по каждому из 4 квадрантов (по часовой от верхней точки). */
+function getQuarterProgress(face, yaw, pitch) {
+  if (!steps.center) {
+    return [centerProgress(face), 0, 0, 0];
+  }
+  if (!steps.left) {
+    return [1, clamp01((-yaw - 6) / 14), 0, 0];
+  }
+  if (!steps.right) {
+    return [1, 1, clamp01((yaw - 6) / 14), 0];
+  }
+  if (!steps.up) {
+    return [1, 1, 1, clamp01((-pitch - 2) / 12)];
+  }
+  return [1, 1, 1, 1];
+}
+
+// Кольцо из коротких сегментов (стиль банковского liveness)
+const RING_SEGMENTS = 52;
+const RING_GAP = 0.06;
+
+function drawProgress(face, yaw, pitch) {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
-  const r = Math.min(canvas.width, canvas.height) * 0.38;
+  const r = Math.min(canvas.width, canvas.height) * 0.36;
+  const quarter = RING_SEGMENTS / 4;
+  const stepAngle = (Math.PI * 2) / RING_SEGMENTS;
+  const segSweep = stepAngle - RING_GAP;
+  const strokeW = Math.max(3, r * 0.055);
+  const quarterP = getQuarterProgress(face, yaw, pitch);
 
-  const arr = [
-    steps.center,
-    steps.left,
-    steps.right,
-    steps.up
-  ];
+  ctx.lineCap = "round";
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < RING_SEGMENTS; i++) {
+    const q = Math.floor(i / quarter);
+    const k = i % quarter;
+    const p = quarterP[q];
+    const done =
+      (q === 0 && steps.center) ||
+      (q === 1 && steps.left) ||
+      (q === 2 && steps.right) ||
+      (q === 3 && steps.up);
+    const pieceOn = done || (k + 1) / quarter <= p;
+
+    const a0 = -Math.PI / 2 + i * stepAngle + RING_GAP / 2;
+    const a1 = a0 + segSweep;
+
     ctx.beginPath();
-
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = arr[i] ? "lime" : "rgba(255,255,255,0.3)";
-
-    const start = (i * Math.PI / 2) - Math.PI/2;
-    const end = start + Math.PI / 2;
-
-    ctx.arc(cx, cy, r, start, end);
+    ctx.lineWidth = strokeW;
+    ctx.strokeStyle = pieceOn
+      ? "rgba(52, 211, 153, 0.95)"
+      : "rgba(255, 255, 255, 0.18)";
+    ctx.arc(cx, cy, r, a0, a1);
     ctx.stroke();
   }
 }
@@ -217,7 +260,7 @@ function loop(stream) {
     if (yaw > 10) steps.right = true;
     if (pitch < -5) steps.up = true;
 
-    drawProgress();
+    drawProgress(face, yaw, pitch);
     statusText.innerText = getInstruction();
   } else {
     statusText.innerText = "Лицо не найдено";
