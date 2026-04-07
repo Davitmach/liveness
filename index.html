@@ -1,202 +1,148 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<title>KYC Particles Liveness</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TMA Liveness Check</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/@regulaforensics/vp-frontend-face-components/dist/main.js"></script>
+    
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+        }
 
-<style>
-body {
-  margin: 0;
-  background: #0f172a;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
-  color: white;
-  font-family: sans-serif;
-}
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            width: 100vw;
+        }
 
-#app {
-  position: relative;
-  width: 320px;
-}
+        /* Настройка внешнего вида компонента SDK */
+        face-liveness-component {
+            width: 100%;
+            height: 100%;
+            --ra-v-camera-overlay-color: rgba(0, 0, 0, 0.7); /* Цвет вокруг круга */
+            --ra-v-camera-circle-stroke-color: #007aff;    /* Цвет рамки круга */
+        }
 
-video, canvas {
-  width: 100%;
-  border-radius: 16px;
-  transform: scaleX(-1);
-}
+        #status-overlay {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 25px;
+            border-radius: 20px;
+            text-align: center;
+            display: none;
+            z-index: 10;
+        }
 
-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-}
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
 
-#status {
-  text-align: center;
-  margin-top: 10px;
-}
-
-button {
-  width: 100%;
-  margin-top: 10px;
-  padding: 10px;
-  border: none;
-  border-radius: 10px;
-  background: #22c55e;
-  color: white;
-  font-size: 16px;
-}
-</style>
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
-
 <body>
 
-<div id="app">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
+<div id="app-container">
+    <face-liveness-component 
+        id="liveness"
+        interactive="true"
+        capture-video="true"
+        copyright="false">
+    </face-liveness-component>
 
-  <div id="status">Нажмите старт</div>
-  <button id="startBtn">Старт</button>
+    <div id="status-overlay">
+        <div class="loader"></div>
+        <span id="status-text">Отправка в IDX...</span>
+    </div>
 </div>
 
-<script type="module">
-import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/+esm";
+<script>
+    // 1. Инициализация Telegram Mini App
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand(); // Разворачиваем на весь экран
 
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const statusText = document.getElementById("status");
+    const livenessElement = document.getElementById('liveness');
+    const statusOverlay = document.getElementById('status-overlay');
+    const statusText = document.getElementById('status-text');
 
-let faceLandmarker;
+    // 2. Слушаем результат от SDK
+    livenessElement.addEventListener('face-liveness', async (event) => {
+        const result = event.detail;
 
-let progress = 0;
-let smoothYaw = 0;
+        // Статус 1 обычно означает успешное прохождение локального теста (движения головой)
+        if (result.status === 1 && result.video) {
+            handleSuccess(result.video);
+        } else if (result.status === 2) {
+            console.log("Проверка отменена или не удалась");
+        }
+    });
 
-// 🎥 камера
-async function initCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user" },
-    audio: false
-  });
+    // 3. Обработка полученного видео
+    async function handleSuccess(videoBlob) {
+        // Показываем лоадер
+        statusOverlay.style.display = 'block';
+        tg.HapticFeedback.notificationOccurred('success');
 
-  video.srcObject = stream;
-  await video.play();
-}
+        console.log("Видео получено, размер:", (videoBlob.size / 1024 / 1024).toFixed(2), "MB");
 
-// 🧠 mediapipe
-async function initFace() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-  );
+        try {
+            // 4. Отправка в твой бэкенд для проксирования в IDX
+            const formData = new FormData();
+            formData.append('video', videoBlob, 'liveness_check.mp4');
+            formData.append('userId', tg.initDataUnsafe?.user?.id || 'unknown');
 
-  faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-    },
-    runningMode: "VIDEO"
-  });
-}
+            // Замени URL на свой эндпоинт
+            const response = await fetch('https://your-backend-api.com/idx-verify', {
+                method: 'POST',
+                body: formData
+            });
 
-// 📐 центр
-function isCentered(face) {
-  const nose = face[1];
-  return nose.x > 0.3 && nose.x < 0.7 && nose.y > 0.3 && nose.y < 0.7;
-}
+            if (response.ok) {
+                statusText.innerText = "Верификация успешна!";
+                setTimeout(() => tg.close(), 2000);
+            } else {
+                throw new Error("IDX rejected video");
+            }
 
-// 🔄 yaw (инвертирован из-за зеркала)
-function getYaw(face) {
-  const left = face[234];
-  const right = face[454];
-  const nose = face[1];
-
-  const dx = right.x - left.x;
-  const center = (left.x + right.x) / 2;
-
-  return -((nose.x - center) / dx * 100);
-}
-
-// 🎨 частицы
-function drawParticles(progress) {
-  const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
-  const r = Math.min(canvas.width, canvas.height) * 0.4;
-
-  const total = 80;
-
-  for (let i = 0; i < total; i++) {
-    const t = i / total;
-
-    const angle = (Math.PI * 2 * t) - Math.PI / 2;
-
-    const x = cx + Math.cos(angle) * r;
-    const y = cy + Math.sin(angle) * r;
-
-    const active = t < progress;
-
-    ctx.beginPath();
-    ctx.arc(x, y, active ? 4 : 2, 0, Math.PI * 2);
-
-    ctx.fillStyle = active ? "white" : "rgba(255,255,255,0.25)";
-    ctx.fill();
-  }
-}
-
-// 🔄 loop
-function loop() {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-
-  const results = faceLandmarker.detectForVideo(video, Date.now());
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (results.faceLandmarks.length > 0) {
-    const face = results.faceLandmarks[0];
-
-    if (isCentered(face)) {
-      const rawYaw = getYaw(face);
-
-      // сглаживание
-      smoothYaw = smoothYaw * 0.8 + rawYaw * 0.2;
-
-      const yaw = smoothYaw;
-
-      // мёртвая зона
-      if (Math.abs(yaw) > 5) {
-        const maxYaw = 30;
-        const normalized = Math.min(Math.abs(yaw) / maxYaw, 1);
-
-        // плавный прогресс
-        progress = progress * 0.9 + normalized * 0.1;
-      }
-
-      statusText.innerText = "Плавно поворачивайте голову";
-    } else {
-      statusText.innerText = "Держите лицо в круге";
+        } catch (error) {
+            statusText.innerText = "Ошибка верификации";
+            console.error(error);
+            setTimeout(() => { statusOverlay.style.display = 'none'; }, 3000);
+        }
     }
 
-    drawParticles(progress);
-
-    if (progress >= 0.95) {
-      statusText.innerText = "Готово ✅";
-    }
-
-  } else {
-    statusText.innerText = "Лицо не найдено";
-  }
-
-  requestAnimationFrame(loop);
-}
-
-// 🚀 старт
-document.getElementById("startBtn").onclick = async () => {
-  await initCamera();
-  await initFace();
-  loop();
-};
+    // Обработка ошибок камеры
+    livenessElement.addEventListener('camera-error', (error) => {
+        alert("Ошибка камеры: " + error.detail);
+    });
 </script>
 
 </body>
