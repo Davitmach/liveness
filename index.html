@@ -149,21 +149,23 @@ function centerProgress(face) {
   return clamp01(1 - dist / 0.42);
 }
 
-/** Прогресс 0..1 по каждому из 4 квадрантов (по часовой от верхней точки). */
-function getQuarterProgress(face, yaw, pitch) {
+/**
+ * Один общий прогресс 0..1 по всему кольцу (по часовой от верха):
+ * сначала четверть круга — центр, потом влево, вправо, вверх.
+ * Так заполняется «лентой», а не целым углом 90° разом.
+ */
+function getRingFill01(face, yaw, pitch) {
+  if (steps.up) return 1;
   if (!steps.center) {
-    return [centerProgress(face), 0, 0, 0];
+    return centerProgress(face) * 0.25;
   }
   if (!steps.left) {
-    return [1, clamp01((-yaw - 6) / 14), 0, 0];
+    return 0.25 + clamp01((-yaw - 6) / 14) * 0.25;
   }
   if (!steps.right) {
-    return [1, 1, clamp01((yaw - 6) / 14), 0];
+    return 0.5 + clamp01((yaw - 6) / 14) * 0.25;
   }
-  if (!steps.up) {
-    return [1, 1, 1, clamp01((-pitch - 2) / 12)];
-  }
-  return [1, 1, 1, 1];
+  return 0.75 + clamp01((-pitch - 2) / 12) * 0.25;
 }
 
 // Кольцо из коротких сегментов (стиль банковского liveness)
@@ -174,24 +176,15 @@ function drawProgress(face, yaw, pitch) {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
   const r = Math.min(canvas.width, canvas.height) * 0.36;
-  const quarter = RING_SEGMENTS / 4;
   const stepAngle = (Math.PI * 2) / RING_SEGMENTS;
   const segSweep = stepAngle - RING_GAP;
   const strokeW = Math.max(3, r * 0.055);
-  const quarterP = getQuarterProgress(face, yaw, pitch);
+  const fill = getRingFill01(face, yaw, pitch);
 
   ctx.lineCap = "round";
 
   for (let i = 0; i < RING_SEGMENTS; i++) {
-    const q = Math.floor(i / quarter);
-    const k = i % quarter;
-    const p = quarterP[q];
-    const done =
-      (q === 0 && steps.center) ||
-      (q === 1 && steps.left) ||
-      (q === 2 && steps.right) ||
-      (q === 3 && steps.up);
-    const pieceOn = done || (k + 1) / quarter <= p;
+    const pieceOn = (i + 1) / RING_SEGMENTS <= fill;
 
     const a0 = -Math.PI / 2 + i * stepAngle + RING_GAP / 2;
     const a1 = a0 + segSweep;
