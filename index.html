@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Liveness KYC Demo</title>
+<title>Liveness Bank Style</title>
 
 <style>
 body {
@@ -70,16 +70,9 @@ const ctx = canvas.getContext("2d");
 const statusText = document.getElementById("status");
 
 let faceLandmarker;
-let recorder;
-let chunks = [];
 
-// 🧠 шаги
-let steps = {
-  center: false,
-  left: false,
-  right: false,
-  up: false
-};
+let progress = 0;
+let lastYaw = 0;
 
 // 🎥 камера
 async function initCamera() {
@@ -90,8 +83,6 @@ async function initCamera() {
 
   video.srcObject = stream;
   await video.play();
-
-  return stream;
 }
 
 // 🧠 mediapipe
@@ -110,18 +101,13 @@ async function initFace() {
 }
 
 // 📐 центр
-function isFaceCentered(face) {
+function isCentered(face) {
   const nose = face[1];
-  return (
-    nose.x > 0.32 &&
-    nose.x < 0.68 &&
-    nose.y > 0.32 &&
-    nose.y < 0.68
-  );
+  return nose.x > 0.4 && nose.x < 0.6 && nose.y > 0.4 && nose.y < 0.6;
 }
 
 // 🔄 поворот головы
-function getHeadPose(face) {
+function getYaw(face) {
   const left = face[234];
   const right = face[454];
   const nose = face[1];
@@ -129,113 +115,47 @@ function getHeadPose(face) {
   const dx = right.x - left.x;
   const center = (left.x + right.x) / 2;
 
-  const yaw = (nose.x - center) / dx * 100;
-
-  const pitch = (nose.y - (left.y + right.y)/2) / dx * 100;
-
-  return { yaw, pitch };
+  return (nose.x - center) / dx * 100;
 }
 
-function clamp01(x) {
-  return Math.max(0, Math.min(1, x));
-}
-
-// 0..1 — насколько лицо близко к центру кадра
-function centerProgress(face) {
-  const nose = face[1];
-  const nx = (nose.x - 0.5) * 2;
-  const ny = (nose.y - 0.5) * 2;
-  const dist = Math.hypot(nx, ny);
-  return clamp01(1 - dist / 0.42);
-}
-
-/**
- * Один общий прогресс 0..1 по всему кольцу (по часовой от верха):
- * сначала четверть круга — центр, потом влево, вправо, вверх.
- * Так заполняется «лентой», а не целым углом 90° разом.
- */
-function getRingFill01(face, yaw, pitch) {
-  if (steps.up) return 1;
-  if (!steps.center) {
-    return centerProgress(face) * 0.25;
-  }
-  if (!steps.left) {
-    return 0.25 + clamp01((-yaw - 6) / 14) * 0.25;
-  }
-  if (!steps.right) {
-    return 0.5 + clamp01((yaw - 6) / 14) * 0.25;
-  }
-  return 0.75 + clamp01((-pitch - 2) / 12) * 0.25;
-}
-
-// Кольцо из коротких сегментов (стиль банковского liveness)
-const RING_SEGMENTS = 52;
-const RING_GAP = 0.06;
-
-function drawProgress(face, yaw, pitch) {
+// 🎨 круг с прогрессом
+function drawCircle(progress) {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
-  const r = Math.min(canvas.width, canvas.height) * 0.36;
-  const stepAngle = (Math.PI * 2) / RING_SEGMENTS;
-  const segSweep = stepAngle - RING_GAP;
-  const strokeW = Math.max(3, r * 0.055);
-  const fill = getRingFill01(face, yaw, pitch);
+  const r = 110;
 
+  // фон
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.lineWidth = 10;
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // glow
+  ctx.shadowBlur = 20;
+  ctx.shadowColor = "lime";
+
+  // прогресс
+  ctx.beginPath();
+  ctx.strokeStyle = "lime";
+  ctx.lineWidth = 10;
   ctx.lineCap = "round";
 
-  for (let i = 0; i < RING_SEGMENTS; i++) {
-    const pieceOn = (i + 1) / RING_SEGMENTS <= fill;
+  ctx.arc(
+    cx,
+    cy,
+    r,
+    -Math.PI / 2,
+    -Math.PI / 2 + (Math.PI * 2 * progress)
+  );
 
-    const a0 = -Math.PI / 2 + i * stepAngle + RING_GAP / 2;
-    const a1 = a0 + segSweep;
+  ctx.stroke();
 
-    ctx.beginPath();
-    ctx.lineWidth = strokeW;
-    ctx.strokeStyle = pieceOn
-      ? "rgba(52, 211, 153, 0.95)"
-      : "rgba(255, 255, 255, 0.18)";
-    ctx.arc(cx, cy, r, a0, a1);
-    ctx.stroke();
-  }
-}
-
-// 💬 текст
-function getInstruction() {
-  if (!steps.center) return "Держите лицо по центру";
-  if (!steps.left) return "Поверните голову влево";
-  if (!steps.right) return "Поверните голову вправо";
-  if (!steps.up) return "Посмотрите вверх";
-  return "Готово ✅";
-}
-
-// 🎬 запись
-function startRecording(stream) {
-  recorder = new MediaRecorder(stream);
-  chunks = [];
-
-  recorder.ondataavailable = e => chunks.push(e.data);
-
-  recorder.start();
-
-  setTimeout(() => recorder.stop(), 5000);
-
-  recorder.onstop = () => {
-    const blob = new Blob(chunks, { type: "video/webm" });
-
-    console.log("VIDEO:", blob);
-
-    const form = new FormData();
-    form.append("video", blob, "video.webm");
-
-    fetch("/upload", {
-      method: "POST",
-      body: form
-    });
-  };
+  ctx.shadowBlur = 0;
 }
 
 // 🔄 loop
-function loop(stream) {
+function loop() {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
 
@@ -246,29 +166,40 @@ function loop(stream) {
   if (results.faceLandmarks.length > 0) {
     const face = results.faceLandmarks[0];
 
-    const { yaw, pitch } = getHeadPose(face);
+    if (isCentered(face)) {
+      const yaw = getYaw(face);
 
-    if (isFaceCentered(face)) steps.center = true;
-    if (yaw < -10) steps.left = true;
-    if (yaw > 10) steps.right = true;
-    if (pitch < -5) steps.up = true;
+      const delta = Math.abs(yaw - lastYaw);
 
-    drawProgress(face, yaw, pitch);
-    statusText.innerText = getInstruction();
+      // плавный рост
+      progress += delta * 0.01;
+      progress = Math.min(progress, 1);
+
+      lastYaw = yaw;
+
+      statusText.innerText = "Плавно поворачивайте голову";
+    } else {
+      statusText.innerText = "Держите лицо в круге";
+    }
+
+    drawCircle(progress);
+
+    if (progress >= 1) {
+      statusText.innerText = "Готово ✅";
+    }
+
   } else {
     statusText.innerText = "Лицо не найдено";
   }
 
-  requestAnimationFrame(() => loop(stream));
+  requestAnimationFrame(loop);
 }
 
 // 🚀 старт
 document.getElementById("startBtn").onclick = async () => {
-  const stream = await initCamera();
+  await initCamera();
   await initFace();
-
-  loop(stream);
-  startRecording(stream);
+  loop();
 };
 </script>
 
