@@ -113,10 +113,10 @@ async function initFace() {
 function isFaceCentered(face) {
   const nose = face[1];
   return (
-    nose.x > 0.4 &&
-    nose.x < 0.6 &&
-    nose.y > 0.4 &&
-    nose.y < 0.6
+    nose.x > 0.32 &&
+    nose.x < 0.68 &&
+    nose.y > 0.32 &&
+    nose.y < 0.68
   );
 }
 
@@ -140,7 +140,7 @@ function getHeadPose(face) {
 function drawProgress() {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
-  const r = 110;
+  const r = Math.min(canvas.width, canvas.height) * 0.38;
 
   const arr = [
     steps.center,
