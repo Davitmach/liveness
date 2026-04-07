@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Liveness Demo</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #0f172a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      color: white;
+      font-family: sans-serif;
+    }
+
+    #app {
+      position: relative;
+      width: 320px;
+    }
+
+    video {
+      width: 100%;
+      border-radius: 16px;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    .circle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 220px;
+      height: 220px;
+      transform: translate(-50%, -50%);
+      border: 4px solid rgba(255,255,255,0.5);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    #status {
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      border: none;
+      border-radius: 10px;
+      background: #22c55e;
+      color: white;
+      font-size: 16px;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="app">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div class="circle"></div>
+
+  <div id="status">Нажмите старт</div>
+  <button id="startBtn">Старт</button>
+</div>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/+esm";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusText = document.getElementById("status");
+
+let faceLandmarker;
+let recorder;
+let chunks = [];
+
+// 🎥 Камера
+async function initCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "user" },
+    audio: false
+  });
+
+  video.srcObject = stream;
+  await video.play();
+
+  return stream;
+}
+
+// 🧠 MediaPipe
+async function initFace() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+  );
+
+  faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+    },
+    runningMode: "VIDEO"
+  });
+}
+
+// 🔍 Проверка центра лица
+function isFaceCentered(face) {
+  const nose = face[1];
+
+  return (
+    nose.x > 0.4 &&
+    nose.x < 0.6 &&
+    nose.y > 0.4 &&
+    nose.y < 0.6
+  );
+}
+
+// 🎬 Запись видео
+function startRecording(stream) {
+  recorder = new MediaRecorder(stream);
+  chunks = [];
+
+  recorder.ondataavailable = e => chunks.push(e.data);
+
+  recorder.start();
+
+  setTimeout(() => recorder.stop(), 3000);
+
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: "video/webm" });
+
+    statusText.innerText = "Видео записано ✅";
+
+    console.log("VIDEO:", blob);
+
+    // 👉 отправка
+    const form = new FormData();
+    form.append("video", blob, "video.webm");
+
+    fetch("/upload", {
+      method: "POST",
+      body: form
+    });
+  };
+}
+
+// 🔄 Основной цикл
+function loop(stream) {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const results = faceLandmarker.detectForVideo(video, Date.now());
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (results.faceLandmarks.length > 0) {
+    const face = results.faceLandmarks[0];
+
+    const ok = isFaceCentered(face);
+
+    statusText.innerText = ok ? "Держите лицо ровно 👍" : "Поместите лицо в круг";
+
+    ctx.fillStyle = ok ? "green" : "red";
+    ctx.fillRect(10, 10, 20, 20);
+  } else {
+    statusText.innerText = "Лицо не найдено";
+  }
+
+  requestAnimationFrame(() => loop(stream));
+}
+
+// 🚀 Старт
+document.getElementById("startBtn").onclick = async () => {
+  const stream = await initCamera();
+  await initFace();
+
+  loop(stream);
+
+  startRecording(stream);
+};
+</script>
+
+</body>
+</html>
