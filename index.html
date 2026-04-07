@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Liveness Bank Style</title>
+<title>KYC Particles Liveness</title>
 
 <style>
 body {
@@ -72,7 +72,7 @@ const statusText = document.getElementById("status");
 let faceLandmarker;
 
 let progress = 0;
-let lastYaw = 0;
+let smoothYaw = 0;
 
 // 🎥 камера
 async function initCamera() {
@@ -103,10 +103,10 @@ async function initFace() {
 // 📐 центр
 function isCentered(face) {
   const nose = face[1];
-  return nose.x > 0.4 && nose.x < 0.6 && nose.y > 0.4 && nose.y < 0.6;
+  return nose.x > 0.3 && nose.x < 0.7 && nose.y > 0.3 && nose.y < 0.7;
 }
 
-// 🔄 поворот головы
+// 🔄 yaw (инвертирован из-за зеркала)
 function getYaw(face) {
   const left = face[234];
   const right = face[454];
@@ -118,40 +118,30 @@ function getYaw(face) {
   return -((nose.x - center) / dx * 100);
 }
 
-// 🎨 круг с прогрессом
-function drawCircle(progress) {
+// 🎨 частицы
+function drawParticles(progress) {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
-  const r = 220;
+  const r = Math.min(canvas.width, canvas.height) * 0.4;
 
-  // фон
-  ctx.beginPath();
-  ctx.strokeStyle = "rgba(255,255,255,0.2)";
-  ctx.lineWidth = 10;
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
+  const total = 80;
 
-  // glow
-  ctx.shadowBlur = 20;
-  ctx.shadowColor = "lime";
+  for (let i = 0; i < total; i++) {
+    const t = i / total;
 
-  // прогресс
-  ctx.beginPath();
-  ctx.strokeStyle = "lime";
-  ctx.lineWidth = 10;
-  ctx.lineCap = "round";
+    const angle = (Math.PI * 2 * t) - Math.PI / 2;
 
-  ctx.arc(
-    cx,
-    cy,
-    r,
-    -Math.PI / 2,
-    -Math.PI / 2 + (Math.PI * 2 * progress)
-  );
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
 
-  ctx.stroke();
+    const active = t < progress;
 
-  ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(x, y, active ? 4 : 2, 0, Math.PI * 2);
+
+    ctx.fillStyle = active ? "white" : "rgba(255,255,255,0.25)";
+    ctx.fill();
+  }
 }
 
 // 🔄 loop
@@ -167,24 +157,30 @@ function loop() {
     const face = results.faceLandmarks[0];
 
     if (isCentered(face)) {
-      const yaw = getYaw(face);
+      const rawYaw = getYaw(face);
 
-      const delta = Math.abs(yaw - lastYaw);
+      // сглаживание
+      smoothYaw = smoothYaw * 0.8 + rawYaw * 0.2;
 
-      // плавный рост
-      progress += delta * 0.01;
-      progress = Math.min(progress, 1);
+      const yaw = smoothYaw;
 
-      lastYaw = yaw;
+      // мёртвая зона
+      if (Math.abs(yaw) > 5) {
+        const maxYaw = 30;
+        const normalized = Math.min(Math.abs(yaw) / maxYaw, 1);
+
+        // плавный прогресс
+        progress = progress * 0.9 + normalized * 0.1;
+      }
 
       statusText.innerText = "Плавно поворачивайте голову";
     } else {
       statusText.innerText = "Держите лицо в круге";
     }
 
-    drawCircle(progress);
+    drawParticles(progress);
 
-    if (progress >= 1) {
+    if (progress >= 0.95) {
       statusText.innerText = "Готово ✅";
     }
 
