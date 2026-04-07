@@ -115,14 +115,14 @@ function getYaw(face) {
   const dx = right.x - left.x;
   const center = (left.x + right.x) / 2;
 
-  return (nose.x - center) / dx * 100;
+  return -((nose.x - center) / dx * 100);
 }
 
 // 🎨 круг с прогрессом
 function drawCircle(progress) {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
-  const r = 110;
+  const r = 220;
 
   // фон
   ctx.beginPath();
