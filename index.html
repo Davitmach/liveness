@@ -1,67 +1,54 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Liveness Demo</title>
+<meta charset="UTF-8">
+<title>Liveness KYC Demo</title>
 
-  <style>
-    body {
-      margin: 0;
-      background: #0f172a;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      color: white;
-      font-family: sans-serif;
-    }
+<style>
+body {
+  margin: 0;
+  background: #0f172a;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  color: white;
+  font-family: sans-serif;
+}
 
-    #app {
-      position: relative;
-      width: 320px;
-    }
+#app {
+  position: relative;
+  width: 320px;
+}
 
-    video {
-      width: 100%;
-      border-radius: 16px;
-    }
-
-    canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-    }
-    video {
+video, canvas {
+  width: 100%;
+  border-radius: 16px;
   transform: scaleX(-1);
 }
-    .circle {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 220px;
-      height: 220px;
-      transform: translate(-50%, -50%);
-      border: 4px solid rgba(255,255,255,0.5);
-      border-radius: 50%;
-      pointer-events: none;
-    }
 
-    #status {
-      text-align: center;
-      margin-top: 10px;
-    }
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
 
-    button {
-      width: 100%;
-      margin-top: 10px;
-      padding: 10px;
-      border: none;
-      border-radius: 10px;
-      background: #22c55e;
-      color: white;
-      font-size: 16px;
-    }
-  </style>
+#status {
+  text-align: center;
+  margin-top: 10px;
+}
+
+button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  background: #22c55e;
+  color: white;
+  font-size: 16px;
+}
+</style>
 </head>
 
 <body>
@@ -69,7 +56,6 @@
 <div id="app">
   <video id="video" autoplay playsinline></video>
   <canvas id="canvas"></canvas>
-  <div class="circle"></div>
 
   <div id="status">Нажмите старт</div>
   <button id="startBtn">Старт</button>
@@ -87,7 +73,15 @@ let faceLandmarker;
 let recorder;
 let chunks = [];
 
-// 🎥 Камера
+// 🧠 шаги
+let steps = {
+  center: false,
+  left: false,
+  right: false,
+  up: false
+};
+
+// 🎥 камера
 async function initCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "user" },
@@ -100,7 +94,7 @@ async function initCamera() {
   return stream;
 }
 
-// 🧠 MediaPipe
+// 🧠 mediapipe
 async function initFace() {
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
@@ -115,10 +109,9 @@ async function initFace() {
   });
 }
 
-// 🔍 Проверка центра лица
+// 📐 центр
 function isFaceCentered(face) {
   const nose = face[1];
-
   return (
     nose.x > 0.4 &&
     nose.x < 0.6 &&
@@ -127,7 +120,59 @@ function isFaceCentered(face) {
   );
 }
 
-// 🎬 Запись видео
+// 🔄 поворот головы
+function getHeadPose(face) {
+  const left = face[234];
+  const right = face[454];
+  const nose = face[1];
+
+  const dx = right.x - left.x;
+  const center = (left.x + right.x) / 2;
+
+  const yaw = (nose.x - center) / dx * 100;
+
+  const pitch = (nose.y - (left.y + right.y)/2) / dx * 100;
+
+  return { yaw, pitch };
+}
+
+// 🎨 круг
+function drawProgress() {
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const r = 110;
+
+  const arr = [
+    steps.center,
+    steps.left,
+    steps.right,
+    steps.up
+  ];
+
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = arr[i] ? "lime" : "rgba(255,255,255,0.3)";
+
+    const start = (i * Math.PI / 2) - Math.PI/2;
+    const end = start + Math.PI / 2;
+
+    ctx.arc(cx, cy, r, start, end);
+    ctx.stroke();
+  }
+}
+
+// 💬 текст
+function getInstruction() {
+  if (!steps.center) return "Держите лицо по центру";
+  if (!steps.left) return "Поверните голову влево";
+  if (!steps.right) return "Поверните голову вправо";
+  if (!steps.up) return "Посмотрите вверх";
+  return "Готово ✅";
+}
+
+// 🎬 запись
 function startRecording(stream) {
   recorder = new MediaRecorder(stream);
   chunks = [];
@@ -136,16 +181,13 @@ function startRecording(stream) {
 
   recorder.start();
 
-  setTimeout(() => recorder.stop(), 3000);
+  setTimeout(() => recorder.stop(), 5000);
 
   recorder.onstop = () => {
     const blob = new Blob(chunks, { type: "video/webm" });
 
-    statusText.innerText = "Видео записано ✅";
-
     console.log("VIDEO:", blob);
 
-    // 👉 отправка
     const form = new FormData();
     form.append("video", blob, "video.webm");
 
@@ -156,7 +198,7 @@ function startRecording(stream) {
   };
 }
 
-// 🔄 Основной цикл
+// 🔄 loop
 function loop(stream) {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
@@ -168,12 +210,15 @@ function loop(stream) {
   if (results.faceLandmarks.length > 0) {
     const face = results.faceLandmarks[0];
 
-    const ok = isFaceCentered(face);
+    const { yaw, pitch } = getHeadPose(face);
 
-    statusText.innerText = ok ? "Держите лицо ровно 👍" : "Поместите лицо в круг";
+    if (isFaceCentered(face)) steps.center = true;
+    if (yaw < -10) steps.left = true;
+    if (yaw > 10) steps.right = true;
+    if (pitch < -5) steps.up = true;
 
-    ctx.fillStyle = ok ? "green" : "red";
-    ctx.fillRect(10, 10, 20, 20);
+    drawProgress();
+    statusText.innerText = getInstruction();
   } else {
     statusText.innerText = "Лицо не найдено";
   }
@@ -181,13 +226,12 @@ function loop(stream) {
   requestAnimationFrame(() => loop(stream));
 }
 
-// 🚀 Старт
+// 🚀 старт
 document.getElementById("startBtn").onclick = async () => {
   const stream = await initCamera();
   await initFace();
 
   loop(stream);
-
   startRecording(stream);
 };
 </script>
